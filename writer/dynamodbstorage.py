@@ -31,11 +31,14 @@ import json
 import geocoder
 import time
 import decimal
-from boto3.dynamodb.types import TypeSerializer, DYNAMODB_CONTEXT
+from boto3.dynamodb.types import TypeSerializer, DYNAMODB_CONTEXT, TypeDeserializer
 # Inhibit Inexact Exceptions
 DYNAMODB_CONTEXT.traps[decimal.Inexact] = 0
 # Inhibit Rounded Exceptions
 DYNAMODB_CONTEXT.traps[decimal.Rounded] = 0
+
+typeserializer = TypeSerializer()
+typedeserializer = TypeDeserializer()
 
 
 SLEEPTIME=2
@@ -63,14 +66,32 @@ def caller(func):
     return _wrap
 
 
+def trycatchwrapper(func):
+
+    def _wrap(*args, **kwargs):
+        try:
+            func(*args, **kwargs)
+            return True
+        except:
+            return False
+
+    return _wrap
 
 def getdynamodb():
     return boto3.client('dynamodb')
 
 def convertToDynamoItem(item):
+    global typeserializer
     return {
-        k: TypeSerializer().serialize(v)
+        k: typeserializer.serialize(v)
         for k, v in item.items()
+    }
+
+def decodeDynamoItem(item):
+    global typedeserializer
+    return {
+        k: typedeserializer.deserialize(v)
+        for k,v in item.items()
     }
 
 jprint = lambda x: print(json.dumps(convertToDynamoItem(x), indent=4))
@@ -86,6 +107,8 @@ class DynamoDBStorage(object):
             self._create_tables()
         print(self._tables)
 
+
+    @trycatchwrapper
     def add_user(self, email, name, time=None, hasCorona=False):
         db_obj = {
             "email" : email,
@@ -97,6 +120,7 @@ class DynamoDBStorage(object):
         jprint(db_obj)
         self._db.put_item(TableName='person', Item=convertToDynamoItem(db_obj))
 
+    @trycatchwrapper
     def add_location(self, email, latitude, longitude):
         db_obj = {
             "email": email,
@@ -108,7 +132,7 @@ class DynamoDBStorage(object):
         jprint(db_obj)
         self._db.put_item(TableName='location', Item=convertToDynamoItem(db_obj))
 
-    def isAtRisk(self, email, time):
+    def isAtRisk(self, email):
         """
         Find from now to time if a person was in contact with
         any person who has corona now
@@ -116,10 +140,12 @@ class DynamoDBStorage(object):
         query_params = {
             "email": email,
         }
-        row =  self._db.get_item(TableName='person', Key=query_params)
+        row =  self._db.get_item(TableName='person', Key=convertToDynamoItem(query_params))
+        result = decodeDynamoItem(row["Item"])
+        if result:
+            return result["hasCorona"]
 
-        if row:
-            return row["hasCorona"]
+    @trycatchwrapper
     def updateUser(self, email, hasCorona=False):
         """
         Update the corona status user with with email
@@ -138,13 +164,13 @@ class DynamoDBStorage(object):
                 }
             ),
             UpdateExpression="SET hasCoronoa = :hasCorona, lastUpdated = :lastUpdated",
-            ExpressionAttributeValues=query_params
+            ExpressionAttributeValues=convertToDynamoItem(query_params)
         )
 
     def getAllPeople(self):
         return self._db.scan(TableName='person')['Items']
 
-    def getAllLocation(self):
+    def getAllLocations(self):
         return self._db.scan(TableName='location')['Items']
 
     @caller
@@ -206,9 +232,10 @@ def main():
     db = DynamoDBStorage()
     # db.add_user("utkarshgautam247@gmail.com", "Utkarsh Gautam")
     # latlng = geocoder.ip('me').latlng
-    latlng = [10.50, 11.60]
-    db.add_location(email, latlng[0], latlng[1])
-    print("Folks ! ", db.getAllLocation())
+    # latlng = [10.50, 11.60]
+    # db.add_location(email, latlng[0], latlng[1])
+    print("Folks ! ", db.getAllLocations())
+    print(f"{email} is at risk {db.isAtRisk(email)}")
 
 
 

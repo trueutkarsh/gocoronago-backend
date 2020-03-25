@@ -1,0 +1,8 @@
+GET http://127.0.0.1:5000//gocoronago/api/v1.0/isAtRisk HTTP/1.1
+content-type: application/json
+
+{
+    "user": {
+        "email": "utkarshgautam247@gmail.com"
+    }
+}
